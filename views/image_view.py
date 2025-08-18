@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
-from PIL import ImageTk
+from PIL import ImageTk, Image
 
 
 class ImageView:

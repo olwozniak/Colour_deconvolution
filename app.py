@@ -4,7 +4,10 @@ from PIL import Image
 from views.controls import ZoomControls, ColorSpaceControls, DeconvolutionControls
 from views.image_view import ImageView
 from views.menu import AppMenu
+from views.channel_viewer import ChannelViewer
 from utils.image_utils import load_image, resize_image
+from image_processing.rgb_split import rgb_split
+import os
 
 
 class AppController:
@@ -36,6 +39,9 @@ class AppController:
         self.deconvolution_controls.frame.pack_forget()
 
         self.menu = AppMenu(self.root, self)
+
+        self.apply_button = tk.Button(self.color_space_controls.frame, text="Apply", command=self.apply_color_space_processing)
+        self.apply_button.pack(side=tk.RIGHT, padx=5)
 
         self.root.bind('<Configure>', self.on_window_resize)
 
@@ -107,6 +113,29 @@ class AppController:
 
         selected_spaces = [space for space, var in self.color_space_controls.cs_vars.items() if var.get()]
         print("Selected color spaces:", selected_spaces)
+
+    def apply_color_space_processing(self):
+        if not self.original_image:
+            messagebox.showerror("Error", "No image uploaded")
+            return
+
+        if self.color_space_controls.cs_vars["RGB"].get():
+            try:
+                # Save temporary image
+                temp_path = os.path.join(os.path.dirname(__file__), "temp_image.png")
+                self.original_image.save(temp_path)
+
+                # Split channels
+                channel_data = rgb_split(temp_path)
+
+                # Show in new window
+                ChannelViewer(self.root, "RGB Channels", channel_data)
+
+                # Clean up
+                os.remove(temp_path)
+
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed: {str(e)}")
 
     def method_changed(self, event=None):
         selected = self.deconvolution_controls.selected_method.get()
