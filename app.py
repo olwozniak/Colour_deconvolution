@@ -6,9 +6,9 @@ from views.image_view import ImageView
 from views.menu import AppMenu
 from views.channel_viewer import ChannelViewer
 from utils.image_utils import load_image, resize_image
-from image_processing.rgb_split import rgb_split
+from image_processing.rgb import rgb_split
+from image_processing.preprocessing import Preprocessing
 import os
-
 
 class AppController:
     def __init__(self, root):
@@ -44,20 +44,24 @@ class AppController:
         self.apply_button.pack(side=tk.RIGHT, padx=5)
 
         self.root.bind('<Configure>', self.on_window_resize)
+        self.preprocessor = Preprocessing()
+        self.processed_data = None
 
     def display_image(self, filepath):
-        try:
-            self.clear_image()
-            self.original_image = load_image(filepath)
-            self.image_view.filepath_label.config(text=filepath)
-            self.user_zoomed = False
-            self.fit_image_to_frame()
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to load image:\n{str(e)}")
+            try:
+                self.clear_image()
+                self.original_image = load_image(filepath)
+                self.image_view.filepath_label.config(text=filepath)
+                self.user_zoomed = False
+                self.fit_image_to_frame()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load image:\n{str(e)}")
+
 
     def clear_image(self):
         self.image_view.clear_image()
         self.original_image = None
+        self.processed_data = None
         self.current_scale = 1.0
         self.user_zoomed = False
         self.zoom_controls.zoom_slider.set(100)
@@ -119,23 +123,25 @@ class AppController:
             messagebox.showerror("Error", "No image uploaded")
             return
 
-        if self.color_space_controls.cs_vars["RGB"].get():
-            try:
-                # Save temporary image
-                temp_path = os.path.join(os.path.dirname(__file__), "temp_image.png")
-                self.original_image.save(temp_path)
+        try:
+            temp_path = os.path.join(os.path.dirname(__file__), "temp_image.png")
+            self.original_image.save(temp_path)
+            self.processed_data = self.preprocessor.load_process_data(temp_path)
+            os.remove(temp_path)
 
-                # Split channels
-                channel_data = rgb_split(temp_path)
+            if self.color_space_controls.cs_vars["RGB"].get():
+                try:
+                    temp_path = os.path.join(os.path.dirname(__file__), "temp_image.png")
+                    self.original_image.save(temp_path)
+                    channel_data = rgb_split(temp_path)
+                    ChannelViewer(self.root, "RGB Channels", channel_data)
+                    os.remove(temp_path)
 
-                # Show in new window
-                ChannelViewer(self.root, "RGB Channels", channel_data)
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed: {str(e)}")
 
-                # Clean up
-                os.remove(temp_path)
-
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed: {str(e)}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to apply color space:\n{str(e)}")
 
     def method_changed(self, event=None):
         selected = self.deconvolution_controls.selected_method.get()
