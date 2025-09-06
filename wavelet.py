@@ -204,16 +204,17 @@ class Wavelet:
 
         return stain_images
 
-    def process_image(self, image, visualise=True):
+    @staticmethod
+    def process_image(image, visualise=True):
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image_od = self.convert_OD(image_rgb)  # Changed from Wavelet.convert_OD
+        image_od = Wavelet.convert_OD(image_rgb)
 
-        wavelet_bands = self.wavelet_decomposition(image_od, levels=3)  # Changed from Wavelet.wavelet_decomposition
+        wavelet_bands = Wavelet.wavelet_decomposition(image_od, levels=3)
 
-        three_channel_bands = self.prep_3_channel(wavelet_bands)  # Changed from Wavelet.prep_3_channel
-        selected_bands = self.select_best_bands(three_channel_bands, num_bands_to_select=20,
-                                                variance_threshold=1e-10,
-                                                plot_selection=False)  # Changed from Wavelet.select_best_bands
+        three_channel_bands = Wavelet.prep_3_channel(wavelet_bands)
+        selected_bands = Wavelet.select_best_bands(three_channel_bands, num_bands_to_select=20,
+                                                   variance_threshold=1e-10,
+                                                   plot_selection=False)
         if selected_bands is None:
             od_flat = image_od.reshape(-1, 3)
             ica = FastICA(n_components=2, random_state=42, max_iter=1000)
@@ -221,10 +222,10 @@ class Wavelet:
             stain_matrix = ica.mixing_
             stain_matrix = stain_matrix / np.linalg.norm(stain_matrix, axis=0)
         else:
-            ica_matrix, od_flat = self.prepare_ica(selected_bands, image_od)  # Changed from Wavelet.prepare_ica
-            stain_matrix, ica_components = self.estimate_stain_matrix(ica_matrix, od_flat,
-                                                                      n_comp=2)  # Changed from Wavelet.estimate_stain_matrix
-        concentrations = self.deconv_stains(od_flat, stain_matrix)  # Changed from Wavelet.deconv_stains
-        stain_images = self.recon_and_vis(concentrations, stain_matrix, image_rgb.shape, image_rgb,
-                                          visualise=visualise)  # Changed from Wavelet.recon_and_vis
+            ica_matrix, od_flat = Wavelet.prepare_ica(selected_bands, image_od)
+            stain_matrix, ica_components = Wavelet.estimate_stain_matrix(ica_matrix, od_flat,
+                                                                         n_comp=2)
+        concentrations = Wavelet.deconv_stains(od_flat, stain_matrix)
+        stain_images = Wavelet.recon_and_vis(concentrations, stain_matrix, image_rgb.shape, image_rgb,
+                                             visualise=visualise)
         return stain_images
