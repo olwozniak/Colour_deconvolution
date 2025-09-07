@@ -12,6 +12,10 @@ class Process:
         og_shape = image_rgb.shape
         image_od = Deconvolution.convert_OD(image_rgb)
         od_flat = image_od.reshape(-1, 3)
+        method = method.lower()
+        valid_methods = ['wavelet', 'ruifork', 'reference']
+        if method not in valid_methods:
+            raise ValueError(f"Unknown method: {method}. Choose from {valid_methods}")
 
         if method == 'wavelet':
             wavelet_bands = Wavelet.wavelet_decomposition(image_od, levels=3)
@@ -30,17 +34,14 @@ class Process:
                 ica = FastICA(n_components=2, random_state=42, max_iter=1000)
                 ica_components = ica.fit_transform(od_flat)
                 stain_matrix = ica.mixing_
-
         elif method == 'reference':
             stain_matrix = np.array([
                 [0.65, 0.07],
                 [0.70, 0.99],
                 [0.29, 0.11]
             ])
-
-        elif method == 'ruifrok':
+        elif method == 'ruifork':
             stain_matrix = Ruifork.estimate_stain_matrix(od_flat, threshold=threshold)
-
         else:
             raise ValueError(f"Nieznana metoda: {method}")
         stain_matrix = Deconvolution.normalize_stain_matrix(stain_matrix)
