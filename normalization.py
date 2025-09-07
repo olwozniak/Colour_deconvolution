@@ -4,6 +4,8 @@ from sklearn.cluster import KMeans
 from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
 from deconvolution import Deconvolution
 import matplotlib.pyplot as plt
+import os
+os.environ['OMP_NUM_THREADS'] = '1'
 
 
 class Normalization:
@@ -21,8 +23,12 @@ class Normalization:
         n_stains = self.target_stain_matrix.shape[1]
         for i in range(n_stains):
             stain_conc = self.target_stain_matrix[:, i]
-            fg_mask, fg_mean, fg_std = self.cluster_stain_channel(stain_conc, method='kmeans')
-            self.target_stats[i] = (fg_mean, fg_std)
+            stain_conc = stain_conc[np.isfinite(stain_conc)]
+            if len(stain_conc) > 0:
+                fg_mask, fg_mean, fg_std = self.cluster_stain_channel(stain_conc, method='kmeans')
+                self.target_stats[i] = (fg_mean, fg_std)
+            else:
+                self.target_stats[i] = (0, 1)
 
     def estimate_stain_matrix(self, image_od, method='reference'):
         od_flat = image_od.reshape(-1, 3)
@@ -74,28 +80,40 @@ class Normalization:
         for c in range(3):
             src_sorted = np.sort(source_flat[:,c])
             target_sorted = np.sort(target_flat[:,c])
-            normalized_flat[:,c] = np.interp(source_flat[:, c], src_sorted,target_sorted)
+            min_length = min(len(src_sorted), len(target_sorted))
+            src_sorted = src_sorted[:min_length]
+            target_sorted = target_sorted[:min_length]
 
-        normalized_image = normalized_flat.reshape(image.shape)
-        return normalized_image.astype(np.uint8)
+            unique_src, src_indices = np.unique(source_flat[:, c], return_inverse=True)
+            normalized_flat[:, c] = np.interp(source_flat[:, c], src_sorted, target_sorted)
+
+        return normalized_flat.reshape(image.shape).astype(np.uint8)
 
     def colour_map_quantile_norm(self, image):
         source_colour = np.unique(image.reshape(-1, 3), axis=0)
         target_colour = np.unique(self.target_image.reshape(-1, 3), axis=0)
 
         normalized_colours = np.zeros_like(source_colour)
-
         for c in range(3):
             src_sorted = np.sort(source_colour[:,c])
             target_sorted = np.sort(target_colour[:,c])
             normalized_colours[:,c] = np.interp(source_colour[:,c], src_sorted,target_sorted)
 
-        color_map = {tuple(src): tuple(norm) for src, norm in zip(source_colour, normalized_colours)}
+        color_map = {}
+        for src, norm in zip(source_colour, normalized_colours):
+            color_map[tuple(src)] = norm
 
         normalized_image = np.zeros_like(image)
-        for i in range(image.shape[0]):
-            for j in range(image.shape[1]):
-                normalized_image[i, j] = color_map[tuple(image[i, j])]
+        flat_image = image.reshape(-1, 3)
+
+        for i, pixel in enumerate(flat_image):
+            pixel_tuple = tuple(pixel)
+            if pixel_tuple in color_map:
+                normalized_image.reshape(-1, 3)[i] = color_map[pixel_tuple]
+            else:
+                distances = np.linalg.norm(source_colour - pixel, axis=1)
+                closest_idx = np.argmin(distances)
+                normalized_image.reshape(-1, 3)[i] = normalized_colours[closest_idx]
 
         return normalized_image.astype(np.uint8)
 
