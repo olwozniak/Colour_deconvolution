@@ -4,10 +4,10 @@ import numpy as np
 from scipy import stats
 from sklearn.decomposition import FastICA
 from sklearn.linear_model import LinearRegression
-from decomposition import Decomposition
+from deconvolution import Deconvolution
 
 
-class Wavelet(Decomposition):
+class Wavelet():
     def __init__(self):
         pass
 
@@ -138,38 +138,11 @@ class Wavelet(Decomposition):
 
     @staticmethod
     def recon_and_vis(concentrations, stain_matrix, og_shape, og_image, visualise=True):
-        reconstructed_image = Wavelet.reconstruct(concentrations, stain_matrix, og_shape)
+        reconstructed_image = Deconvolution.reconstruct(concentrations, stain_matrix, og_shape)
 
-        stain_images = Wavelet.extract_individual_stains(concentrations, stain_matrix, og_shape)
+        stain_images = Deconvolution.extract_individual_stains(concentrations, stain_matrix, og_shape)
 
         if visualise:
-            Wavelet.visualise_image(og_image, reconstructed_image, stain_images, concentrations)
-
-        return stain_images
-
-    @staticmethod
-    def process_image(image, visualise=True):
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image_od = Wavelet.convert_OD(image_rgb)
-        original_shape = image_od.shape[:2]
-
-        wavelet_bands = Wavelet.wavelet_decomposition(image_od, levels=3)
-        three_channel_bands = Wavelet.prep_3_channel(wavelet_bands, original_shape)
-        selected_bands = Wavelet.select_best_bands(three_channel_bands, num_bands_to_select=20,
-                                                   variance_threshold=1e-10, plot_selection=False)
-
-        if selected_bands is None:
-            od_flat = image_od.reshape(-1, 3)
-            ica = FastICA(n_components=2, random_state=42, max_iter=1000)
-            ica_components = ica.fit_transform(od_flat)
-            stain_matrix = ica.mixing_
-            stain_matrix = stain_matrix / np.linalg.norm(stain_matrix, axis=0)
-        else:
-            ica_matrix, od_flat = Wavelet.prepare_ica(selected_bands, image_od)
-            stain_matrix, ica_components = Wavelet.estimate_stain_matrix(ica_matrix, od_flat, n_comp=2)
-
-        concentrations = Wavelet.deconv_stains(od_flat, stain_matrix)
-        stain_images = Wavelet.recon_and_vis(concentrations, stain_matrix, image_rgb.shape, image_rgb,
-                                             visualise=visualise)
+            Deconvolution.visualise_image(og_image, reconstructed_image, stain_images, concentrations)
 
         return stain_images
