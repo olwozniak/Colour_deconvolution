@@ -1,14 +1,25 @@
 from deconvolution import Deconvolution
+from normalization import Normalization
 from wavelet import Wavelet
 from ruifork import Ruifork
 import cv2
 from sklearn.decomposition import FastICA
 import numpy as np
+from normalization import Normalization
 
 class Process:
     @staticmethod
-    def process_image(image, visualise=True, method='wavelet', threshold=0.15):
+    def process_image(image, visualise=True, method='wavelet', normalization_method = None, target_image=None,  threshold=0.15):
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        if normalization_method is not None:
+            if target_image is None:
+                raise ValueError('target_image is required')
+            target_rgb = cv2.cvtColor(target_image, cv2.COLOR_BGR2RGB)
+            normalizer = Normalization(target_rgb)
+            normalizer.extract_target_stains_stats()
+            image_rgb = normalizer.normalize(image_rgb, method=normalization_method)
+
         og_shape = image_rgb.shape
         image_od = Deconvolution.convert_OD(image_rgb)
         od_flat = image_od.reshape(-1, 3)
