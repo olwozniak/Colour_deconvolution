@@ -1,2 +1,2 @@
 from .wavelet import Wavelet
-from .reinhard import Reinhard
+from .normalization import Reinhard

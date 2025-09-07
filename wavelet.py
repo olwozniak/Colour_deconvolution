@@ -1,18 +1,15 @@
 import cv2
 import pywt
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy import stats
 from sklearn.decomposition import FastICA
 from sklearn.linear_model import LinearRegression
+from decomposition import Decomposition
 
 
-class Wavelet:
-    @staticmethod
-    def convert_OD(image, I_0=255):
-        image = np.clip(image.astype(np.float64), 1, None)
-        od_image = -np.log10(image / I_0)
-        return od_image
+class Wavelet(Decomposition):
+    def __init__(self):
+        pass
 
     @staticmethod
     def wavelet_decomposition(od_image, wavelet='haar', levels=5):
@@ -35,36 +32,25 @@ class Wavelet:
         return all_bands
 
     @staticmethod
-    def prep_3_channel(wavelet_bands):
+    def prep_3_channel(wavelet_bands, original_shape):
         band_types = {}
         for channel_idx, channel_bands in enumerate(wavelet_bands):
             for band_name, band_data in channel_bands:
                 if band_name not in band_types:
                     band_types[band_name] = [None, None, None]
-                band_types[band_name][channel_idx] = band_data
+                if band_data.shape != original_shape:
+                    resized_data = cv2.resize(band_data, (original_shape[1], original_shape[0]),
+                                              interpolation=cv2.INTER_CUBIC)
+                    band_types[band_name][channel_idx] = resized_data
+                else:
+                    band_types[band_name][channel_idx] = band_data
 
         three_channel_bands = []
 
         for band_name, channel_data in band_types.items():
-            shapes = []
-            for data in channel_data:
-                if data is not None:
-                    shapes.append(str(data.shape))
-                else:
-                    shapes.append("None")
-
-        for band_name, channel_data in band_types.items():
             if all(data is not None for data in channel_data):
-                if channel_data[0].shape == channel_data[1].shape == channel_data[2].shape:
-                    three_channel_band = np.stack(channel_data, axis=-1)
-                    three_channel_bands.append((band_name, three_channel_band))
-                else:
-                    continue
-            else:
-                missing = []
-                for i, data in enumerate(channel_data):
-                    if data is None:
-                        missing.append(['R', 'G', 'B'][i])
+                three_channel_band = np.stack(channel_data, axis=-1)
+                three_channel_bands.append((band_name, three_channel_band))
 
         return three_channel_bands
 
@@ -83,7 +69,7 @@ class Wavelet:
 
             normalized_band = (flat_band - np.mean(flat_band)) / (np.std(flat_band) + 1e-10)
             kurt = stats.kurtosis(normalized_band)
-            band_data.append((band_name, normalized_band))
+            band_data.append((band_name, band))
             kurtosis_values.append(abs(kurt))
             variance_values.append(band_variance)
             band_names.append(band_name)
@@ -96,7 +82,6 @@ class Wavelet:
             num_bands_to_select = num_available
 
         selected_indices = np.argsort(kurtosis_values)[-num_bands_to_select:]
-
         selected_bands = [band_data[i] for i in selected_indices]
 
         return selected_bands
@@ -104,11 +89,35 @@ class Wavelet:
     @staticmethod
     def prepare_ica(selected_bands, image_od):
         ica_data = []
+        target_size = image_od.shape[0] * image_od.shape[1]
         for band_name, band_data in selected_bands:
-            ica_data.append(band_data)
+            flat_band = band_data.reshape(-1)
+
+            if len(flat_band) != target_size:
+                original_shape = band_data.shape[:2]
+
+                scale_factor = np.sqrt(target_size / len(flat_band))
+                new_shape = (int(original_shape[0] * scale_factor),
+                             int(original_shape[1] * scale_factor))
+
+                resized_band = cv2.resize(band_data, (new_shape[1], new_shape[0]),
+                                          interpolation=cv2.INTER_CUBIC)
+                flat_band = resized_band.reshape(-1)
+
+                if len(flat_band) > target_size:
+                    flat_band = flat_band[:target_size]
+                elif len(flat_band) < target_size:
+                    flat_band = np.pad(flat_band, (0, target_size - len(flat_band)),
+                                       mode='constant')
+
+            ica_data.append(flat_band)
 
         ica_matrix = np.column_stack(ica_data)
         od_flat = image_od.reshape(-1, 3)
+
+        if ica_matrix.shape[0] != od_flat.shape[0]:
+            raise ValueError(
+                f"Inconsistent sizes after processing: ICA matrix has {ica_matrix.shape[0]} samples, OD has {od_flat.shape[0]} samples")
 
         return ica_matrix, od_flat
 
@@ -128,72 +137,6 @@ class Wavelet:
         return stain_matrix, components
 
     @staticmethod
-    def deconv_stains(od_flat, stain_matrix):
-        if stain_matrix.shape[0] != 3:
-            stain_matrix = stain_matrix.T
-        stain_matrix_inv = np.linalg.pinv(stain_matrix)
-        concentration = np.dot(od_flat, stain_matrix_inv.T)
-        return concentration
-
-    @staticmethod
-    def reconstruct(concentration, stain_matrix, og_shape):
-        od_recon = np.dot(concentration, stain_matrix.T)
-        rgb_recon = 255 * np.exp(-od_recon)
-        rgb_recon = np.clip(rgb_recon, 0, 255).ast(np.uint8)
-        rgb_recon = rgb_recon.reshape(og_shape)
-
-        return rgb_recon
-
-    @staticmethod
-    def extract_individual_stains(concentration, stain_matrix, og_shape):
-        stain_images = []
-        for i in range(stain_matrix.shape[1]):
-            od_single = np.outer(concentration[:, i], stain_matrix[:, i])
-            rgb_single = 255 * (10 ** (-od_single))
-            rgb_single = np.clip(rgb_single, 0, 255).astype(np.uint8)
-            rgb_single = rgb_single.reshape(og_shape)
-            stain_images.append(rgb_single)
-
-        return stain_images
-
-    @staticmethod
-    def image_diff(img1, img2):
-        diff = np.abs(img1.astype(float) - img2.astype(float))
-        return diff
-
-    @staticmethod
-    def visualise_image(og_image, image_recon, stain_image, concentration):
-        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-
-        axes[0, 0].imshow(og_image)
-        axes[0, 0].set_title('Oryginalny obraz')
-        axes[0, 0].axis('off')
-
-        axes[0, 1].imshow(image_recon)
-        axes[0, 1].set_title('Obraz rekonstruowany')
-        axes[0, 1].axis('off')
-
-        diff = Wavelet.image_diff(og_image, image_recon)
-        axes[0, 2].imshow(diff, cmap='hot')
-        axes[0, 2].set_title('Różnica (oryginał - rekonstrukcja)')
-        axes[0, 2].axis('off')
-
-        for i in range(min(2, len(stain_image))):
-            axes[1, i].imshow(stain_image[i])
-            axes[1, i].set_title(f'Barwnik {i + 1}')
-            axes[1, i].axis('off')
-
-        if concentration.shape[1] > 0:
-            axes[1, 2].hist(concentration[:, 0], bins=50, alpha=0.7, label='Barwnik 1')
-        if concentration.shape[1] > 1:
-            axes[1, 2].hist(concentration[:, 1], bins=50, alpha=0.7, label='Barwnik 2')
-        axes[1, 2].set_title('Histogram stężeń barwników')
-        axes[1, 2].legend()
-
-        plt.tight_layout()
-        plt.show()
-
-    @staticmethod
     def recon_and_vis(concentrations, stain_matrix, og_shape, og_image, visualise=True):
         reconstructed_image = Wavelet.reconstruct(concentrations, stain_matrix, og_shape)
 
@@ -208,13 +151,13 @@ class Wavelet:
     def process_image(image, visualise=True):
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image_od = Wavelet.convert_OD(image_rgb)
+        original_shape = image_od.shape[:2]
 
         wavelet_bands = Wavelet.wavelet_decomposition(image_od, levels=3)
-
-        three_channel_bands = Wavelet.prep_3_channel(wavelet_bands)
+        three_channel_bands = Wavelet.prep_3_channel(wavelet_bands, original_shape)
         selected_bands = Wavelet.select_best_bands(three_channel_bands, num_bands_to_select=20,
-                                                   variance_threshold=1e-10,
-                                                   plot_selection=False)
+                                                   variance_threshold=1e-10, plot_selection=False)
+
         if selected_bands is None:
             od_flat = image_od.reshape(-1, 3)
             ica = FastICA(n_components=2, random_state=42, max_iter=1000)
@@ -223,9 +166,10 @@ class Wavelet:
             stain_matrix = stain_matrix / np.linalg.norm(stain_matrix, axis=0)
         else:
             ica_matrix, od_flat = Wavelet.prepare_ica(selected_bands, image_od)
-            stain_matrix, ica_components = Wavelet.estimate_stain_matrix(ica_matrix, od_flat,
-                                                                         n_comp=2)
+            stain_matrix, ica_components = Wavelet.estimate_stain_matrix(ica_matrix, od_flat, n_comp=2)
+
         concentrations = Wavelet.deconv_stains(od_flat, stain_matrix)
         stain_images = Wavelet.recon_and_vis(concentrations, stain_matrix, image_rgb.shape, image_rgb,
                                              visualise=visualise)
+
         return stain_images
