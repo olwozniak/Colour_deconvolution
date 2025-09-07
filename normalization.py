@@ -5,8 +5,10 @@ from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
 from deconvolution import Deconvolution
 import matplotlib.pyplot as plt
 import os
-os.environ['OMP_NUM_THREADS'] = '1'
 
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
 
 class Normalization:
     def __init__(self, target_image):
@@ -52,16 +54,16 @@ class Normalization:
 
         if method == 'kmeans':
             kmeans = KMeans(n_clusters=2, random_state=0).fit(flat_channel)
-            centers = kmeans.cluster_centers_
+            centers = kmeans.cluster_centers_.flatten()
             labels = kmeans.labels_
         elif method == 'em':
             gmm = GaussianMixture(n_components=2, random_state=0).fit(flat_channel)
             labels = gmm.predict(flat_channel)
-            centers = gmm.means_
+            centers = gmm.means_.flatten()
         elif method == 'vb':
             bgm = BayesianGaussianMixture(n_components=2, random_state=0).fit(flat_channel)
             labels = bgm.predict(flat_channel)
-            centers = bgm.means_
+            centers = bgm.means_.flatten()
         else:
             raise ValueError("Method must be 'kmeans', 'em', or 'vb'")
 
@@ -93,16 +95,47 @@ class Normalization:
         source_colour = np.unique(image.reshape(-1, 3), axis=0)
         target_colour = np.unique(self.target_image.reshape(-1, 3), axis=0)
 
+        # Sprawdź, czy mamy wystarczająco dużo punktów do interpolacji
+        if len(source_colour) < 2 or len(target_colour) < 2:
+            print("Warning: Not enough unique colors for quantile normalization. Returning original image.")
+            return image
+
         normalized_colours = np.zeros_like(source_colour)
         for c in range(3):
-            src_sorted = np.sort(source_colour[:,c])
-            target_sorted = np.sort(target_colour[:,c])
-            normalized_colours[:,c] = np.interp(source_colour[:,c], src_sorted,target_sorted)
+            src_channel = source_colour[:, c]
+            target_channel = target_colour[:, c]
 
+            # Sortuj kanały
+            src_sorted = np.sort(src_channel)
+            target_sorted = np.sort(target_channel)
+
+            # Upewnij się, że tablice mają tę samą długość
+            min_length = min(len(src_sorted), len(target_sorted))
+            if min_length < 2:
+                # Jeśli nie ma wystarczająco punktów, użyj prostej normalizacji liniowej
+                src_min, src_max = np.min(src_channel), np.max(src_channel)
+                target_min, target_max = np.min(target_channel), np.max(target_channel)
+
+                if src_max - src_min > 0:
+                    normalized = (src_channel - src_min) * (target_max - target_min) / (src_max - src_min) + target_min
+                else:
+                    normalized = np.full_like(src_channel, target_min)
+            else:
+                # Przycinaj do tej samej długości
+                src_sorted = src_sorted[:min_length]
+                target_sorted = target_sorted[:min_length]
+
+                # Interpolacja kwantylowa
+                normalized = np.interp(src_channel, src_sorted, target_sorted)
+
+            normalized_colours[:, c] = normalized
+
+        # Tworzenie mapy kolorów
         color_map = {}
         for src, norm in zip(source_colour, normalized_colours):
             color_map[tuple(src)] = norm
 
+        # Zastosowanie mapowania do całego obrazu
         normalized_image = np.zeros_like(image)
         flat_image = image.reshape(-1, 3)
 
@@ -111,6 +144,7 @@ class Normalization:
             if pixel_tuple in color_map:
                 normalized_image.reshape(-1, 3)[i] = color_map[pixel_tuple]
             else:
+                # Znajdź najbliższy kolor w source_colour
                 distances = np.linalg.norm(source_colour - pixel, axis=1)
                 closest_idx = np.argmin(distances)
                 normalized_image.reshape(-1, 3)[i] = normalized_colours[closest_idx]
@@ -166,7 +200,6 @@ class Normalization:
             raise ValueError("Unsupported normalization method")
 
     def visualize_normalization(self, original, normalized, title="Normalization Result"):
-        """Visualize original vs normalized image"""
         fig, axes = plt.subplots(1, 2, figsize=(12, 6))
 
         axes[0].imshow(original)
@@ -179,38 +212,3 @@ class Normalization:
 
         plt.tight_layout()
         plt.show()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
