@@ -1,6 +1,8 @@
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import os
+from datetime import datetime
 from deconvolution import Deconvolution
 from deconvolution_processing import Process
 from normalization import Normalization
@@ -9,7 +11,7 @@ from normalization import Normalization
 class Compare:
 
     @staticmethod
-    def compare_methods(image, target_image=None):
+    def compare_methods(image, target_image=None, save_dir=None):
         """
         Porównuje wszystkie kombinacje metod dekonwolucji i normalizacji
         """
@@ -67,10 +69,24 @@ class Compare:
                     axes[i, j].axis('off')
 
         plt.tight_layout()
+
+        # Zapisz wykres jeśli podano ścieżkę
+        if save_dir:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"compare_methods_{timestamp}.png"
+            save_path = os.path.join(save_dir, filename)
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Wykres zapisano jako: {save_path}")
+
         plt.show()
 
+        if save_dir:
+            return save_path
+        return None
+
     @staticmethod
-    def compare_clustering_methods(image, target_image, deconv_method='wavelet', norm_method='stain_specific'):
+    def compare_clustering_methods(image, target_image, deconv_method='wavelet', norm_method='stain_specific',
+                                   save_dir=None):
         """
         Porównuje różne metody klasteryzacji w normalizacji specyficznej dla plam
         """
@@ -139,212 +155,45 @@ class Compare:
                 results[cluster_method] = {'error': str(e)}
 
         plt.tight_layout()
+
+        # Zapisz wykres jeśli podano ścieżkę
+        if save_dir:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"clustering_comparison_{timestamp}.png"
+            save_path = os.path.join(save_dir, filename)
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Wykres zapisano jako: {save_path}")
+
         plt.show()
 
         # Generuj analizę metod klasteryzacji
         Compare.analyze_clustering_results(results)
 
-        return results
+        if save_dir:
+            # Zapisz również wyniki analizy do pliku tekstowego
+            analysis_filename = f"clustering_analysis_{timestamp}.txt"
+            analysis_path = os.path.join(save_dir, analysis_filename)
+            Compare.save_analysis_to_file(results, analysis_path)
 
-    @staticmethod
-    def calculate_stain_metrics(stain_images, concentrations, stain_matrix, original_image):
-        """Oblicza metryki jakości dla wyników dekonwolucji"""
-        metrics = {}
-
-        if stain_images is None or len(stain_images) == 0:
-            return metrics
-
-        # 1. Kontrast plam
-        for idx, stain_img in enumerate(stain_images):
-            gray_stain = cv2.cvtColor(stain_img, cv2.COLOR_RGB2GRAY)
-            metrics[f'stain_{idx}_contrast'] = np.std(gray_stain)
-            metrics[f'stain_{idx}_mean'] = np.mean(gray_stain)
-
-        # 2. Separowalność plam
-        if len(stain_images) >= 2:
-            stain1_gray = cv2.cvtColor(stain_images[0], cv2.COLOR_RGB2GRAY)
-            stain2_gray = cv2.cvtColor(stain_images[1], cv2.COLOR_RGB2GRAY)
-
-            # Międzyklasowa wariancja
-            between_class_var = np.var(np.concatenate([stain1_gray.flatten(), stain2_gray.flatten()]))
-            metrics['between_class_variance'] = between_class_var
-
-            # Współczynnik korelacji
-            correlation = np.corrcoef(stain1_gray.flatten(), stain2_gray.flatten())[0, 1]
-            metrics['stain_correlation'] = abs(correlation)
-
-        # 3. Jakość rekonstrukcji
-        try:
-            reconstructed = Deconvolution.reconstruct(concentrations, stain_matrix, original_image.shape)
-            mse = np.mean((original_image.astype(float) - reconstructed.astype(float)) ** 2)
-            metrics['reconstruction_mse'] = mse
-
-            if mse > 0:
-                metrics['psnr'] = 20 * np.log10(255.0 / np.sqrt(mse))
-        except:
-            metrics['reconstruction_mse'] = float('inf')
-            metrics['psnr'] = 0
-
-        # 4. Entropia
-        for idx, stain_img in enumerate(stain_images):
-            gray_stain = cv2.cvtColor(stain_img, cv2.COLOR_RGB2GRAY)
-            hist = cv2.calcHist([gray_stain], [0], None, [256], [0, 256])
-            hist = hist / hist.sum()
-            entropy = -np.sum(hist * np.log2(hist + 1e-10))
-            metrics[f'stain_{idx}_entropy'] = entropy
-
-        return metrics
-
-    @staticmethod
-    def analyze_clustering_results(results):
-        """
-        Analizuje i wyświetla wnioski z porównania metod klasteryzacji
-        """
-        print("=" * 80)
-        print("ANALIZA METOD KLASTERYZACJI")
-        print("=" * 80)
-
-        valid_results = {k: v for k, v in results.items() if isinstance(v, dict) and 'error' not in v}
-
-        if not valid_results:
-            print("Brak wyników do analizy")
-            return
-
-        # Znajdź najlepszą metodę dla każdej metryki
-        best_methods = {}
-        metrics_to_analyze = ['between_class_variance', 'stain_correlation',
-                              'reconstruction_mse', 'stain_0_contrast', 'stain_1_contrast']
-
-        for metric in metrics_to_analyze:
-            best_value = None
-            best_method = None
-
-            for method, metrics in valid_results.items():
-                if metric in metrics:
-                    value = metrics[metric]
-
-                    # Określ czy wyższa czy niższa wartość jest lepsza
-                    if metric in ['reconstruction_mse', 'stain_correlation']:
-                        if best_value is None or value < best_value:
-                            best_value = value
-                            best_method = method
-                    else:
-                        if best_value is None or value > best_value:
-                            best_value = value
-                            best_method = method
-
-            if best_method is not None:
-                best_methods[metric] = (best_method, best_value)
-
-        # Wyświetl wyniki
-        print("\nNAJLEPSZE METODY KLASTERYZACJI:")
-        print("-" * 50)
-        for metric, (method, value) in best_methods.items():
-            metric_name = {
-                'between_class_variance': 'Separacja plam',
-                'stain_correlation': 'Korelacja plam',
-                'reconstruction_mse': 'Błąd rekonstrukcji',
-                'stain_0_contrast': 'Kontrast plamy 0',
-                'stain_1_contrast': 'Kontrast plamy 1'
-            }.get(metric, metric)
-
-            print(f"{metric_name:20s}: {method:8s} (wartość: {value:.4f})")
-
-        # Ranking ogólny
-        method_scores = {method: 0 for method in valid_results.keys()}
-        for metric, (method, value) in best_methods.items():
-            method_scores[method] += 1
-
-        print("\nRANKING OGÓLNY METOD KLASTERYZACJI:")
-        print("-" * 50)
-        for method, score in sorted(method_scores.items(), key=lambda x: x[1], reverse=True):
-            print(f"{method:8s}: {score} najlepszych wyników")
-
-        # Szczegółowa analiza każdej metody
-        print("\nSZczEGÓŁOWA ANALIZA:")
-        print("-" * 50)
-        for method, metrics in valid_results.items():
-            print(f"\nMetoda: {method}")
-            if 'between_class_variance' in metrics:
-                var = metrics['between_class_variance']
-                if var > 1000:
-                    sep_quality = "DOSKONAŁA"
-                elif var > 500:
-                    sep_quality = "DOBRA"
-                else:
-                    sep_quality = "SŁABA"
-                print(f"  → Separacja plam: {var:.1f} ({sep_quality})")
-
-            if 'stain_correlation' in metrics:
-                corr = metrics['stain_correlation']
-                if corr < 0.1:
-                    corr_quality = "BARDZO DOBRA"
-                elif corr < 0.3:
-                    corr_quality = "DOBRA"
-                else:
-                    corr_quality = "SŁABA"
-                print(f"  → Korelacja plam: {corr:.3f} ({corr_quality})")
-
-            if 'reconstruction_mse' in metrics:
-                mse = metrics['reconstruction_mse']
-                if mse < 100:
-                    mse_quality = "DOSKONAŁA"
-                elif mse < 500:
-                    mse_quality = "DOBRA"
-                else:
-                    mse_quality = "SŁABA"
-                print(f"  → Jakość rekonstrukcji: {mse:.1f} ({mse_quality})")
-
-        # Rekomendacja końcowa
-        best_overall = max(method_scores.items(), key=lambda x: x[1])[0]
-        print(f"\nREKOMENDACJA: Najlepsza metoda klasteryzacji → {best_overall.upper()}")
-        print("=" * 80)
-
-    @staticmethod
-    def quantitative_comparison(image, target_image=None):
-        """
-        Ilościowe porównanie metod za pomocą różnych metryk
-        """
-        deconv_methods = ['wavelet', 'ruifork', 'reference']
-        norm_methods = ['stain_specific', 'reinhard', 'all_pixel_quantile', 'colour_map_quantile', None]
-
-        results = {}
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        if target_image is not None:
-            target_rgb = cv2.cvtColor(target_image, cv2.COLOR_BGR2RGB)
-
-        for deconv_method in deconv_methods:
-            for norm_method in norm_methods:
-                try:
-                    key = f'{deconv_method}_{norm_method if norm_method else "none"}'
-                    print(f"Processing: {key}")
-
-                    # Normalizacja
-                    if norm_method is not None and target_image is not None:
-                        normalizer = Normalization(target_rgb)
-                        normalizer.extract_target_stains_stats()
-                        normalized_image = normalizer.normalize(image_rgb, method=norm_method)
-                    else:
-                        normalized_image = image_rgb
-
-                    # Dekonwolucja
-                    stain_images, stain_matrix, concentrations = Process.process_image(
-                        cv2.cvtColor(normalized_image, cv2.COLOR_RGB2BGR),
-                        visualise=False,
-                        method=deconv_method,
-                        normalization_method=None
-                    )
-
-                    # Obliczanie metryk
-                    metrics = Compare.calculate_stain_metrics(stain_images, concentrations, stain_matrix, image_rgb)
-                    results[key] = metrics
-
-                except Exception as e:
-                    print(f"Error with {deconv_method}_{norm_method}: {e}")
-                    results[f'{deconv_method}_{norm_method if norm_method else "none"}'] = {'error': str(e)}
+            return save_path, analysis_path
 
         return results
+
+    @staticmethod
+    def save_analysis_to_file(results, filepath):
+        """Zapisuje analizę do pliku tekstowego"""
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write("ANALIZA METOD KLASTERYZACJI\n")
+            f.write("=" * 50 + "\n\n")
+
+            for method, metrics in results.items():
+                f.write(f"Metoda: {method}\n")
+                if isinstance(metrics, dict) and 'error' not in metrics:
+                    for key, value in metrics.items():
+                        f.write(f"  {key}: {value}\n")
+                else:
+                    f.write(f"  Error: {metrics}\n")
+                f.write("\n")
 
     @staticmethod
     def plot_quantitative_results(quantitative_results, save_path=None):
@@ -396,129 +245,98 @@ class Compare:
         plt.tight_layout()
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Wykres ilościowy zapisano jako: {save_path}")
         plt.show()
 
     @staticmethod
-    def generate_comprehensive_analysis(results):
+    def quantitative_comparison(image, target_image=None, save_dir=None):
         """
-        Generuje szczegółową analizę i wnioski z wyników
+        Ilościowe porównanie metod za pomocą różnych metryk
         """
-        print("=" * 80)
-        print("KOMPREHENSYWNA ANALIZA WYNIKÓW")
-        print("=" * 80)
+        deconv_methods = ['wavelet', 'ruifork', 'reference']
+        norm_methods = ['stain_specific', 'reinhard', 'all_pixel_quantile', 'colour_map_quantile', None]
 
-        # Znajdź najlepsze metody dla każdej metryki
-        best_methods = {}
-        metrics_to_analyze = ['reconstruction_mse', 'between_class_variance',
-                              'stain_correlation', 'psnr', 'stain_0_contrast', 'stain_1_contrast']
+        results = {}
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        for metric in metrics_to_analyze:
-            best_value = None
-            best_method = None
+        if target_image is not None:
+            target_rgb = cv2.cvtColor(target_image, cv2.COLOR_BGR2RGB)
 
-            for method, metrics_dict in results.items():
-                if (isinstance(metrics_dict, dict) and metric in metrics_dict and
-                        not isinstance(metrics_dict[metric], str)):
+        for deconv_method in deconv_methods:
+            for norm_method in norm_methods:
+                try:
+                    key = f'{deconv_method}_{norm_method if norm_method else "none"}'
+                    print(f"Processing: {key}")
 
-                    value = metrics_dict[metric]
-
-                    # Określ czy wyższa czy niższa wartość jest lepsza
-                    if metric in ['reconstruction_mse', 'stain_correlation']:
-                        if best_value is None or value < best_value:
-                            best_value = value
-                            best_method = method
+                    # Normalizacja
+                    if norm_method is not None and target_image is not None:
+                        normalizer = Normalization(target_rgb)
+                        normalizer.extract_target_stains_stats()
+                        normalized_image = normalizer.normalize(image_rgb, method=norm_method)
                     else:
-                        if best_value is None or value > best_value:
-                            best_value = value
-                            best_method = method
+                        normalized_image = image_rgb
 
-            if best_method is not None:
-                best_methods[metric] = (best_method, best_value)
+                    # Dekonwolucja
+                    stain_images, stain_matrix, concentrations = Process.process_image(
+                        cv2.cvtColor(normalized_image, cv2.COLOR_RGB2BGR),
+                        visualise=False,
+                        method=deconv_method,
+                        normalization_method=None
+                    )
 
-        # Analiza dekonwolucji
-        deconv_performance = {'wavelet': 0, 'ruifork': 0, 'reference': 0}
-        for metric, (method, value) in best_methods.items():
-            for deconv in deconv_performance.keys():
-                if deconv in method:
-                    deconv_performance[deconv] += 1
+                    # Obliczanie metryk
+                    metrics = Compare.calculate_stain_metrics(stain_images, concentrations, stain_matrix, image_rgb)
+                    results[key] = metrics
 
-        # Analiza normalizacji
-        norm_performance = {
-            'stain_specific': 0, 'reinhard': 0,
-            'all_pixel_quantile': 0, 'colour_map_quantile': 0, 'none': 0
-        }
-        for metric, (method, value) in best_methods.items():
-            for norm in norm_performance.keys():
-                if norm in method or (norm == 'none' and 'none' in method):
-                    norm_performance[norm] += 1
+                except Exception as e:
+                    print(f"Error with {deconv_method}_{norm_method}: {e}")
+                    results[f'{deconv_method}_{norm_method if norm_method else "none"}'] = {'error': str(e)}
 
-        # Wyświetl wyniki
-        print("\nNAJLEPSZE KOMBINACJE DLA POSZCZEGÓLNYCH METRYK:")
-        print("-" * 60)
-        for metric, (method, value) in best_methods.items():
-            print(f"{metric:25s}: {method:30s} (wartość: {value:.4f})")
+        # Zapisz wyniki do pliku jeśli podano ścieżkę
+        if save_dir:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            results_filename = f"quantitative_results_{timestamp}.json"
+            results_path = os.path.join(save_dir, results_filename)
 
-        print("\nWNIOSKI - WYDajNOŚĆ METOD DEKONWOLUCJI:")
-        print("-" * 60)
-        best_deconv = max(deconv_performance.items(), key=lambda x: x[1])
-        for deconv, score in sorted(deconv_performance.items(), key=lambda x: x[1], reverse=True):
-            print(f"{deconv:15s}: {score:2d} najlepszych wyników")
-        print(f"→ Najlepsza metoda dekonwolucji: {best_deconv[0]}")
+            import json
+            # Konwersja do formatu JSON-serializable
+            serializable_results = {}
+            for key, value in results.items():
+                if isinstance(value, dict):
+                    serializable_results[key] = {k: (float(v) if isinstance(v, (np.floating, float)) else v)
+                                                 for k, v in value.items()}
+                else:
+                    serializable_results[key] = value
 
-        print("\nWNIOSKI - WYDajNOŚĆ METOD NORMALIZACJI:")
-        print("-" * 60)
-        best_norm = max(norm_performance.items(), key=lambda x: x[1])
-        for norm, score in sorted(norm_performance.items(), key=lambda x: x[1], reverse=True):
-            print(f"{norm:20s}: {score:2d} najlepszych wyników")
-        print(f"→ Najlepsza metoda normalizacji: {best_norm[0]}")
+            with open(results_path, 'w') as f:
+                json.dump(serializable_results, f, indent=4)
 
-        # Szczegółowa analiza jakości
-        print("\nANALIZA JAKOŚCI:")
-        print("-" * 60)
+            print(f"Wyniki ilościowe zapisano jako: {results_path}")
 
-        # Analiza rekonstrukcji
-        mse_values = []
-        for method, metrics in results.items():
-            if 'reconstruction_mse' in metrics and not isinstance(metrics['reconstruction_mse'], str):
-                mse_values.append(metrics['reconstruction_mse'])
+            # Stwórz i zapisz wykres
+            plot_filename = f"quantitative_plot_{timestamp}.png"
+            plot_path = os.path.join(save_dir, plot_filename)
+            Compare.plot_quantitative_results(results, plot_path)
 
-        if mse_values:
-            avg_mse = np.mean(mse_values)
-            print(f"Średni błąd rekonstrukcji (MSE): {avg_mse:.4f}")
-            if avg_mse < 100:
-                print("→ Doskonała jakość rekonstrukcji")
-            elif avg_mse < 500:
-                print("→ Dobra jakość rekonstrukcji")
-            else:
-                print("→ Umiarkowana jakość rekonstrukcji")
+            return results, results_path, plot_path
 
-        # Analiza separacji plam
-        correlation_values = []
-        for method, metrics in results.items():
-            if 'stain_correlation' in metrics and not isinstance(metrics['stain_correlation'], str):
-                correlation_values.append(metrics['stain_correlation'])
+        return results
 
-        if correlation_values:
-            avg_corr = np.mean(correlation_values)
-            print(f"Średnia korelacja między plamami: {avg_corr:.4f}")
-            if avg_corr < 0.1:
-                print("→ Doskonała separacja plam")
-            elif avg_corr < 0.3:
-                print("→ Dobra separacja plam")
-            else:
-                print("→ Słaba separacja plam")
 
-        # Rekomendacja końcowa
-        print("\nREKOMENDACJA KOŃCOWA:")
-        print("-" * 60)
-        best_overall = best_methods.get('between_class_variance', ('unknown', 0))[0]
-        print(f"Rekomendowana kombinacja: {best_overall}")
+# Przykład użycia:
+if __name__ == "__main__":
+    # Załaduj obrazy
+    image = cv2.imread('sciezka/do/obrazu.jpg')
+    target_image = cv2.imread('sciezka/do/obrazu_referencyjnego.jpg')
 
-        best_deconv_part = best_overall.split('_')[0]
-        best_norm_part = best_overall.split('_')[1] if '_' in best_overall else 'none'
+    # Utwórz katalog do zapisu jeśli nie istnieje
+    save_directory = "results"
+    os.makedirs(save_directory, exist_ok=True)
 
-        print(f"→ Metoda dekonwolucji: {best_deconv_part}")
-        print(f"→ Metoda normalizacji: {best_norm_part}")
+    # Użyj z zapisem do pliku
+    saved_plot_path = Compare.compare_methods(image, target_image, save_dir=save_directory)
 
-        print("=" * 80)
-
+    # Wyniki ilościowe z zapisem
+    results, results_path, plot_path = Compare.quantitative_comparison(
+        image, target_image, save_dir=save_directory
+    )
