@@ -1,3 +1,5 @@
+import os
+import time
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,21 +11,18 @@ from normalization import Normalization
 class Compare:
 
     @staticmethod
-    def compare_methods(image, target_image=None):
-        """
-        Porównuje wszystkie kombinacje metod dekonwolucji i normalizacji
-        """
-        # Lista dostępnych metod
+    def compare_methods(image, target_image, save_dir=None):
         deconv_methods = ['wavelet', 'ruifork', 'reference']
         norm_methods = ['stain_specific', 'reinhard', 'all_pixel_quantile', 'colour_map_quantile', None]
-
-        # Przygotowanie obrazu źródłowego
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
+        target_rgb = None
         if target_image is not None:
             target_rgb = cv2.cvtColor(target_image, cv2.COLOR_BGR2RGB)
 
-        # Tworzenie siatki wykresów
+        results = {}
+        timing_results = {}
+
         n_rows = len(deconv_methods)
         n_cols = len(norm_methods)
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 4, n_rows * 4))
@@ -33,19 +32,19 @@ class Compare:
         if n_cols == 1:
             axes = axes.reshape(-1, 1)
 
-        # Przetwarzanie każdej kombinacji
         for i, deconv_method in enumerate(deconv_methods):
             for j, norm_method in enumerate(norm_methods):
+                method_name = f"{deconv_method}_{norm_method if norm_method else 'none'}"
+                start_time = time.time()
+
                 try:
-                    # Normalizacja jeśli wybrana
-                    if norm_method is not None and target_image is not None:
+                    if norm_method is not None and target_rgb is not None:
                         normalizer = Normalization(target_rgb)
                         normalizer.extract_target_stains_stats()
                         normalized_image = normalizer.normalize(image_rgb, method=norm_method)
                     else:
                         normalized_image = image_rgb
 
-                    # Dekonwolucja
                     stain_images, stain_matrix, concentrations = Process.process_image(
                         cv2.cvtColor(normalized_image, cv2.COLOR_RGB2BGR),
                         visualise=False,
@@ -53,12 +52,19 @@ class Compare:
                         normalization_method=None
                     )
 
-                    # Wyświetlanie wyniku
                     if stain_images is not None and len(stain_images) > 0:
                         combined_stains = np.hstack(stain_images[:2]) if len(stain_images) >= 2 else stain_images[0]
                         axes[i, j].imshow(combined_stains)
+
                     axes[i, j].set_title(f'Deconv: {deconv_method}\nNorm: {norm_method if norm_method else "None"}')
                     axes[i, j].axis('off')
+
+                    results[method_name] = {
+                        'stain_images': stain_images,
+                        'stain_matrix': stain_matrix,
+                        'concentrations': concentrations,
+                        'normalized_image': normalized_image
+                    }
 
                 except Exception as e:
                     axes[i, j].text(0.5, 0.5, f'Error:\n{str(e)}',
@@ -66,24 +72,32 @@ class Compare:
                     axes[i, j].set_title(f'Deconv: {deconv_method}\nNorm: {norm_method if norm_method else "None"}')
                     axes[i, j].axis('off')
 
+                    results[method_name] = {'error': str(e)}
+                end_time = time.time()
+                timing_results[method_name] = end_time - start_time
+
         plt.tight_layout()
+        plot_path = None
+        if save_dir:
+            plot_path = os.path.join(save_dir, "methods_comparison.png")
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            print(f"Wykres porównania metod zapisano jako: {plot_path}")
+
         plt.show()
 
+        return results, plot_path, timing_results
+
     @staticmethod
-    def compare_clustering_methods(image, target_image, deconv_method='wavelet', norm_method='stain_specific'):
-        """
-        Porównuje różne metody klasteryzacji w normalizacji specyficznej dla plam
-        """
+    def compare_clustering_methods(image, target_image, deconv_method='wavelet', norm_method='stain_specific',
+                                   save_dir=None):
         clustering_methods = ['kmeans', 'em', 'vb']
 
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         target_rgb = cv2.cvtColor(target_image, cv2.COLOR_BGR2RGB)
 
-        # Tworzenie siatki wykresów
         n_cols = len(clustering_methods) + 1  # +1 dla oryginału
         fig, axes = plt.subplots(2, n_cols, figsize=(n_cols * 4, 8))
 
-        # Wyświetl oryginalny obraz
         axes[0, 0].imshow(image_rgb)
         axes[0, 0].set_title('Original Image')
         axes[0, 0].axis('off')
@@ -93,38 +107,45 @@ class Compare:
         axes[1, 0].axis('off')
 
         results = {}
+        timing_results = {}
 
         for j, cluster_method in enumerate(clustering_methods, 1):
+            method_name = f"clustering_{cluster_method}"
+            start_time = time.time()
+
             try:
-                # Normalizacja z różnymi metodami klasteryzacji
                 normalizer = Normalization(target_rgb)
                 normalizer.extract_target_stains_stats()
+                cluster_params = {}
+                if cluster_method in ['em', 'vb']:
+                    cluster_params = {
+                        'max_iter': 1000,
+                        'tol': 1e-6,
+                        'n_init': 5,
+                        'random_state': 42
+                    }
 
                 normalized_image = normalizer.normalize(
                     image_rgb,
                     method=norm_method,
-                    cluster_method=cluster_method
+                    cluster_method=cluster_method,
+                    **cluster_params
                 )
-
-                # Dekonwolucja
                 stain_images, stain_matrix, concentrations = Process.process_image(
                     cv2.cvtColor(normalized_image, cv2.COLOR_RGB2BGR),
                     visualise=False,
                     method=deconv_method,
                     normalization_method=None
                 )
-
-                # Wyświetl wyniki
                 if stain_images is not None and len(stain_images) > 0:
                     axes[0, j].imshow(normalized_image)
                     axes[0, j].set_title(f'Normalized\n({cluster_method})')
                     axes[0, j].axis('off')
 
-                    axes[1, j].imshow(stain_images[0])  # pierwsza plama
+                    axes[1, j].imshow(stain_images[0])
                     axes[1, j].set_title(f'Stain 0\n({cluster_method})')
                     axes[1, j].axis('off')
 
-                # Oblicz metryki
                 metrics = Compare.calculate_stain_metrics(stain_images, concentrations, stain_matrix, image_rgb)
                 results[cluster_method] = metrics
 
@@ -138,42 +159,40 @@ class Compare:
                 axes[1, j].axis('off')
                 results[cluster_method] = {'error': str(e)}
 
-        plt.tight_layout()
-        plt.show()
+            end_time = time.time()
+            timing_results[cluster_method] = end_time - start_time
 
-        # Generuj analizę metod klasteryzacji
+        plt.tight_layout()
+        plot_path = None
+        if save_dir:
+            plot_path = os.path.join(save_dir, f"clustering_comparison_{deconv_method}_{norm_method}.png")
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            print(f"Wykres porównania klasteryzacji zapisano jako: {plot_path}")
+        plt.show()
         Compare.analyze_clustering_results(results)
 
-        return results
+        return results, plot_path, timing_results
 
     @staticmethod
     def calculate_stain_metrics(stain_images, concentrations, stain_matrix, original_image):
-        """Oblicza metryki jakości dla wyników dekonwolucji"""
         metrics = {}
 
         if stain_images is None or len(stain_images) == 0:
             return metrics
-
-        # 1. Kontrast plam
         for idx, stain_img in enumerate(stain_images):
             gray_stain = cv2.cvtColor(stain_img, cv2.COLOR_RGB2GRAY)
             metrics[f'stain_{idx}_contrast'] = np.std(gray_stain)
             metrics[f'stain_{idx}_mean'] = np.mean(gray_stain)
 
-        # 2. Separowalność plam
         if len(stain_images) >= 2:
             stain1_gray = cv2.cvtColor(stain_images[0], cv2.COLOR_RGB2GRAY)
             stain2_gray = cv2.cvtColor(stain_images[1], cv2.COLOR_RGB2GRAY)
 
-            # Międzyklasowa wariancja
             between_class_var = np.var(np.concatenate([stain1_gray.flatten(), stain2_gray.flatten()]))
             metrics['between_class_variance'] = between_class_var
 
-            # Współczynnik korelacji
             correlation = np.corrcoef(stain1_gray.flatten(), stain2_gray.flatten())[0, 1]
             metrics['stain_correlation'] = abs(correlation)
-
-        # 3. Jakość rekonstrukcji
         try:
             reconstructed = Deconvolution.reconstruct(concentrations, stain_matrix, original_image.shape)
             mse = np.mean((original_image.astype(float) - reconstructed.astype(float)) ** 2)
@@ -185,7 +204,6 @@ class Compare:
             metrics['reconstruction_mse'] = float('inf')
             metrics['psnr'] = 0
 
-        # 4. Entropia
         for idx, stain_img in enumerate(stain_images):
             gray_stain = cv2.cvtColor(stain_img, cv2.COLOR_RGB2GRAY)
             hist = cv2.calcHist([gray_stain], [0], None, [256], [0, 256])
@@ -197,12 +215,7 @@ class Compare:
 
     @staticmethod
     def analyze_clustering_results(results):
-        """
-        Analizuje i wyświetla wnioski z porównania metod klasteryzacji
-        """
-        print("=" * 80)
         print("ANALIZA METOD KLASTERYZACJI")
-        print("=" * 80)
 
         valid_results = {k: v for k, v in results.items() if isinstance(v, dict) and 'error' not in v}
 
@@ -210,7 +223,6 @@ class Compare:
             print("Brak wyników do analizy")
             return
 
-        # Znajdź najlepszą metodę dla każdej metryki
         best_methods = {}
         metrics_to_analyze = ['between_class_variance', 'stain_correlation',
                               'reconstruction_mse', 'stain_0_contrast', 'stain_1_contrast']
@@ -223,7 +235,6 @@ class Compare:
                 if metric in metrics:
                     value = metrics[metric]
 
-                    # Określ czy wyższa czy niższa wartość jest lepsza
                     if metric in ['reconstruction_mse', 'stain_correlation']:
                         if best_value is None or value < best_value:
                             best_value = value
@@ -236,9 +247,7 @@ class Compare:
             if best_method is not None:
                 best_methods[metric] = (best_method, best_value)
 
-        # Wyświetl wyniki
         print("\nNAJLEPSZE METODY KLASTERYZACJI:")
-        print("-" * 50)
         for metric, (method, value) in best_methods.items():
             metric_name = {
                 'between_class_variance': 'Separacja plam',
@@ -250,19 +259,15 @@ class Compare:
 
             print(f"{metric_name:20s}: {method:8s} (wartość: {value:.4f})")
 
-        # Ranking ogólny
         method_scores = {method: 0 for method in valid_results.keys()}
         for metric, (method, value) in best_methods.items():
             method_scores[method] += 1
 
-        print("\nRANKING OGÓLNY METOD KLASTERYZACJI:")
-        print("-" * 50)
+        print("\nPODSUMOWANIE:")
         for method, score in sorted(method_scores.items(), key=lambda x: x[1], reverse=True):
             print(f"{method:8s}: {score} najlepszych wyników")
 
-        # Szczegółowa analiza każdej metody
-        print("\nSZczEGÓŁOWA ANALIZA:")
-        print("-" * 50)
+        print("\nANALIZA WYNIKÓW:")
         for method, metrics in valid_results.items():
             print(f"\nMetoda: {method}")
             if 'between_class_variance' in metrics:
@@ -295,40 +300,36 @@ class Compare:
                     mse_quality = "SŁABA"
                 print(f"  → Jakość rekonstrukcji: {mse:.1f} ({mse_quality})")
 
-        # Rekomendacja końcowa
         best_overall = max(method_scores.items(), key=lambda x: x[1])[0]
         print(f"\nREKOMENDACJA: Najlepsza metoda klasteryzacji → {best_overall.upper()}")
-        print("=" * 80)
 
     @staticmethod
-    def quantitative_comparison(image, target_image=None):
-        """
-        Ilościowe porównanie metod za pomocą różnych metryk
-        """
+    def quantitative_comparison(image, target_image=None, save_dir=None):
         deconv_methods = ['wavelet', 'ruifork', 'reference']
         norm_methods = ['stain_specific', 'reinhard', 'all_pixel_quantile', 'colour_map_quantile', None]
 
         results = {}
+        timing_results = {}
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
+        target_rgb = None
         if target_image is not None:
             target_rgb = cv2.cvtColor(target_image, cv2.COLOR_BGR2RGB)
 
         for deconv_method in deconv_methods:
             for norm_method in norm_methods:
-                try:
-                    key = f'{deconv_method}_{norm_method if norm_method else "none"}'
-                    print(f"Processing: {key}")
+                method_name = f'{deconv_method}_{norm_method if norm_method else "none"}'
+                start_time = time.time()
 
-                    # Normalizacja
-                    if norm_method is not None and target_image is not None:
+                try:
+                    print(f"Processing: {method_name}")
+                    if norm_method is not None and target_rgb is not None:
                         normalizer = Normalization(target_rgb)
                         normalizer.extract_target_stains_stats()
                         normalized_image = normalizer.normalize(image_rgb, method=norm_method)
                     else:
                         normalized_image = image_rgb
 
-                    # Dekonwolucja
                     stain_images, stain_matrix, concentrations = Process.process_image(
                         cv2.cvtColor(normalized_image, cv2.COLOR_RGB2BGR),
                         visualise=False,
@@ -336,78 +337,142 @@ class Compare:
                         normalization_method=None
                     )
 
-                    # Obliczanie metryk
                     metrics = Compare.calculate_stain_metrics(stain_images, concentrations, stain_matrix, image_rgb)
-                    results[key] = metrics
+                    results[method_name] = metrics
 
                 except Exception as e:
                     print(f"Error with {deconv_method}_{norm_method}: {e}")
-                    results[f'{deconv_method}_{norm_method if norm_method else "none"}'] = {'error': str(e)}
+                    results[method_name] = {'error': str(e)}
 
-        return results
+                end_time = time.time()
+                timing_results[method_name] = end_time - start_time
+
+        return results, timing_results
 
     @staticmethod
-    def plot_quantitative_results(quantitative_results, save_path=None):
-        """
-        Wizualizacja wyników ilościowych
-        """
-        methods = list(quantitative_results.keys())
-        if not methods:
-            return
+    def plot_quantitative_results(results, save_path=None):
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
 
-        # Pobierz wszystkie dostępne metryki
-        all_metrics = set()
-        for method_data in quantitative_results.values():
-            if isinstance(method_data, dict):
-                all_metrics.update(method_data.keys())
+        methods = list(results.keys())
 
-        metrics = [m for m in all_metrics if not m.startswith('stain_') or m.endswith('_contrast')]
+        colors = ['skyblue', 'lightgreen', 'lightcoral', 'gold', 'lightpink',
+                  'lightblue', 'wheat', 'palegreen', 'lavender', 'bisque']
 
-        n_metrics = len(metrics)
-        fig, axes = plt.subplots(1, n_metrics, figsize=(n_metrics * 6, 8))
+        metrics_data = {
+            'MSE Rekonstrukcji': [results[m].get('reconstruction_mse', 0) for m in methods],
+            'Wariancja międzyklasowa': [results[m].get('between_class_variance', 0) for m in methods],
+            'Korelacja plam': [results[m].get('stain_correlation', 0) for m in methods],
+            'SSIM': [results[m].get('ssim', 0) for m in methods]
+        }
 
-        if n_metrics == 1:
-            axes = [axes]
+        for idx, (metric_name, values) in enumerate(metrics_data.items()):
+            ax = axes[idx // 2, idx % 2]
+            bar_colors = [colors[i % len(colors)] for i in range(len(methods))]
 
-        colors = plt.cm.Set3(np.linspace(0, 1, len(methods)))
+            bars = ax.bar(range(len(methods)), values, color=bar_colors, alpha=0.7)
+            ax.set_title(metric_name)
+            ax.set_ylabel('Wartość')
+            ax.set_xticks(range(len(methods)))
+            ax.set_xticklabels(methods, rotation=45, ha='right')
 
-        for i, metric in enumerate(metrics):
-            values = []
-            valid_methods = []
-            method_colors = []
-
-            for idx, method in enumerate(methods):
-                if (metric in quantitative_results[method] and
-                        not isinstance(quantitative_results[method][metric], str)):
-                    values.append(quantitative_results[method][metric])
-                    valid_methods.append(method)
-                    method_colors.append(colors[idx])
-
-            if values:
-                bars = axes[i].bar(valid_methods, values, color=method_colors)
-                axes[i].set_title(metric, fontsize=12, fontweight='bold')
-                axes[i].tick_params(axis='x', rotation=45)
-                axes[i].grid(True, alpha=0.3)
-
-                for bar, value in zip(bars, values):
-                    axes[i].text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
-                                 f'{value:.3f}', ha='center', va='bottom')
+            for i, bar in enumerate(bars):
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width() / 2., height + 0.01,
+                        f'{height:.3f}', ha='center', va='bottom', fontsize=8)
 
         plt.tight_layout()
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Wykres wyników ilościowych zapisano jako: {save_path}")
+
         plt.show()
 
     @staticmethod
-    def generate_comprehensive_analysis(results):
-        """
-        Generuje szczegółową analizę i wnioski z wyników
-        """
-        print("=" * 80)
-        print("KOMPREHENSYWNA ANALIZA WYNIKÓW")
-        print("=" * 80)
+    def plot_timing_results(timing_results, save_path=None):
+        if not timing_results:
+            print("Brak danych czasowych do wyświetlenia")
+            return
 
-        # Znajdź najlepsze metody dla każdej metryki
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        methods = list(timing_results.keys())
+        times = [timing_results[m] for m in methods]
+
+        sorted_indices = np.argsort(times)[::-1]
+        sorted_methods = [methods[i] for i in sorted_indices]
+        sorted_times = [times[i] for i in sorted_indices]
+
+        bars = ax.bar(range(len(sorted_methods)), sorted_times,
+                      color=plt.cm.viridis(np.linspace(0, 1, len(sorted_methods))))
+
+        ax.set_title('Czas wykonania metod', fontsize=16, fontweight='bold')
+        ax.set_ylabel('Czas [s]', fontsize=12)
+        ax.set_xlabel('Metoda', fontsize=12)
+        ax.set_xticks(range(len(sorted_methods)))
+        ax.set_xticklabels(sorted_methods, rotation=45, ha='right')
+
+        for i, bar in enumerate(bars):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2., height + 0.01,
+                    f'{height:.2f}s', ha='center', va='bottom', fontsize=10)
+
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Wykres czasów wykonania zapisano jako: {save_path}")
+
+        plt.show()
+
+        print("\n📊 STATYSTYKI CZASOWE:")
+        print("-" * 30)
+        print(f"Najszybsza metoda: {min(timing_results, key=timing_results.get)} ({min(timing_results.values()):.2f}s)")
+        print(
+            f"Najwolniejsza metoda: {max(timing_results, key=timing_results.get)} ({max(timing_results.values()):.2f}s)")
+        print(f"Średni czas: {np.mean(list(timing_results.values())):.2f}s")
+        print(f"Łączny czas wszystkich metod: {sum(timing_results.values()):.2f}s")
+
+    @staticmethod
+    def analyze_timing_performance(timing_results):
+        if not timing_results:
+            print("Brak danych czasowych do analizy")
+            return
+        print("ANALIZA WYDAJNOŚCI CZASOWEJ")
+
+        deconv_times = {}
+        norm_times = {}
+
+        for method, time_val in timing_results.items():
+            if '_' in method:
+                deconv, norm = method.split('_', 1)
+                if deconv not in deconv_times:
+                    deconv_times[deconv] = []
+                deconv_times[deconv].append(time_val)
+
+                if norm not in norm_times:
+                    norm_times[norm] = []
+                norm_times[norm].append(time_val)
+
+        print("\nŚREDNIE CZASY WYKONANIA DEKONWOLUCJI:")
+        for deconv, times in deconv_times.items():
+            print(f"{deconv:15s}: {np.mean(times):.2f}s (min: {min(times):.2f}s, max: {max(times):.2f}s)")
+        print("\nŚREDNIE CZASY WYKONANIA NORMALIZACJI:")
+        for norm, times in norm_times.items():
+            print(f"{norm:20s}: {np.mean(times):.2f}s (min: {min(times):.2f}s, max: {max(times):.2f}s)")
+        print("\nNAJLEPSZE METODY POD WZGLĘDEM CZASU:")
+        fastest_methods = sorted(timing_results.items(), key=lambda x: x[1])[:5]
+        for method, time_val in fastest_methods:
+            print(f"{method:30s}: {time_val:.2f}s")
+        return {
+            'deconv_times': {k: np.mean(v) for k, v in deconv_times.items()},
+            'norm_times': {k: np.mean(v) for k, v in norm_times.items()},
+            'fastest_methods': fastest_methods
+        }
+
+    @staticmethod
+    def generate_comprehensive_analysis(results):
+        print("ANALIZA WYNIKÓW")
+
         best_methods = {}
         metrics_to_analyze = ['reconstruction_mse', 'between_class_variance',
                               'stain_correlation', 'psnr', 'stain_0_contrast', 'stain_1_contrast']
@@ -421,8 +486,6 @@ class Compare:
                         not isinstance(metrics_dict[metric], str)):
 
                     value = metrics_dict[metric]
-
-                    # Określ czy wyższa czy niższa wartość jest lepsza
                     if metric in ['reconstruction_mse', 'stain_correlation']:
                         if best_value is None or value < best_value:
                             best_value = value
@@ -435,14 +498,12 @@ class Compare:
             if best_method is not None:
                 best_methods[metric] = (best_method, best_value)
 
-        # Analiza dekonwolucji
         deconv_performance = {'wavelet': 0, 'ruifork': 0, 'reference': 0}
         for metric, (method, value) in best_methods.items():
             for deconv in deconv_performance.keys():
                 if deconv in method:
                     deconv_performance[deconv] += 1
 
-        # Analiza normalizacji
         norm_performance = {
             'stain_specific': 0, 'reinhard': 0,
             'all_pixel_quantile': 0, 'colour_map_quantile': 0, 'none': 0
@@ -452,31 +513,21 @@ class Compare:
                 if norm in method or (norm == 'none' and 'none' in method):
                     norm_performance[norm] += 1
 
-        # Wyświetl wyniki
         print("\nNAJLEPSZE KOMBINACJE DLA POSZCZEGÓLNYCH METRYK:")
-        print("-" * 60)
         for metric, (method, value) in best_methods.items():
             print(f"{metric:25s}: {method:30s} (wartość: {value:.4f})")
-
         print("\nWNIOSKI - WYDajNOŚĆ METOD DEKONWOLUCJI:")
-        print("-" * 60)
         best_deconv = max(deconv_performance.items(), key=lambda x: x[1])
         for deconv, score in sorted(deconv_performance.items(), key=lambda x: x[1], reverse=True):
             print(f"{deconv:15s}: {score:2d} najlepszych wyników")
         print(f"→ Najlepsza metoda dekonwolucji: {best_deconv[0]}")
-
         print("\nWNIOSKI - WYDajNOŚĆ METOD NORMALIZACJI:")
-        print("-" * 60)
         best_norm = max(norm_performance.items(), key=lambda x: x[1])
         for norm, score in sorted(norm_performance.items(), key=lambda x: x[1], reverse=True):
             print(f"{norm:20s}: {score:2d} najlepszych wyników")
         print(f"→ Najlepsza metoda normalizacji: {best_norm[0]}")
-
-        # Szczegółowa analiza jakości
         print("\nANALIZA JAKOŚCI:")
-        print("-" * 60)
 
-        # Analiza rekonstrukcji
         mse_values = []
         for method, metrics in results.items():
             if 'reconstruction_mse' in metrics and not isinstance(metrics['reconstruction_mse'], str):
@@ -492,7 +543,6 @@ class Compare:
             else:
                 print("→ Umiarkowana jakość rekonstrukcji")
 
-        # Analiza separacji plam
         correlation_values = []
         for method, metrics in results.items():
             if 'stain_correlation' in metrics and not isinstance(metrics['stain_correlation'], str):
@@ -508,9 +558,7 @@ class Compare:
             else:
                 print("→ Słaba separacja plam")
 
-        # Rekomendacja końcowa
         print("\nREKOMENDACJA KOŃCOWA:")
-        print("-" * 60)
         best_overall = best_methods.get('between_class_variance', ('unknown', 0))[0]
         print(f"Rekomendowana kombinacja: {best_overall}")
 
@@ -519,6 +567,3 @@ class Compare:
 
         print(f"→ Metoda dekonwolucji: {best_deconv_part}")
         print(f"→ Metoda normalizacji: {best_norm_part}")
-
-        print("=" * 80)
-

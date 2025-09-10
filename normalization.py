@@ -23,14 +23,17 @@ class Normalization:
         self.target_stain_matrix = self.estimate_stain_matrix(self.target_od, method)
         self.target_concentrations = Deconvolution.deconv_stains(self.target_od_flat, self.target_stain_matrix)
         n_stains = self.target_stain_matrix.shape[1]
+
         for i in range(n_stains):
-            stain_conc = self.target_stain_matrix[:, i]
+            stain_conc = self.target_concentrations[:, i]
             stain_conc = stain_conc[np.isfinite(stain_conc)]
-            if len(stain_conc) > 0:
+
+            if len(stain_conc) > 1:
                 fg_mask, fg_mean, fg_std = self.cluster_stain_channel(stain_conc, method='kmeans')
                 self.target_stats[i] = (fg_mean, fg_std)
             else:
-                self.target_stats[i] = (0, 1)
+                self.target_stats[i] = (np.mean(stain_conc) if len(stain_conc) > 0 else 0,
+                                        np.std(stain_conc) if len(stain_conc) > 1 else 1.0)
 
     def estimate_stain_matrix(self, image_od, method='reference'):
         od_flat = image_od.reshape(-1, 3)
@@ -51,29 +54,43 @@ class Normalization:
     def cluster_stain_channel(self, stain_channel, method='kmeans'):
         flat_channel = stain_channel.flatten()
         flat_channel = flat_channel[np.isfinite(flat_channel)].reshape(-1, 1)
+        if len(flat_channel) < 2:
+            return np.ones(len(stain_channel), dtype=bool), np.mean(stain_channel), np.std(stain_channel) if len(
+                stain_channel) > 0 else 1.0
 
-        if method == 'kmeans':
-            kmeans = KMeans(n_clusters=2, random_state=0).fit(flat_channel)
-            centers = kmeans.cluster_centers_.flatten()
-            labels = kmeans.labels_
-        elif method == 'em':
-            gmm = GaussianMixture(n_components=2, random_state=0).fit(flat_channel)
-            labels = gmm.predict(flat_channel)
-            centers = gmm.means_.flatten()
-        elif method == 'vb':
-            bgm = BayesianGaussianMixture(n_components=2, random_state=0).fit(flat_channel)
-            labels = bgm.predict(flat_channel)
-            centers = bgm.means_.flatten()
-        else:
-            raise ValueError("Method must be 'kmeans', 'em', or 'vb'")
+        try:
+            if method == 'kmeans':
+                kmeans = KMeans(n_clusters=2, random_state=0, n_init=10).fit(flat_channel)
+                centers = kmeans.cluster_centers_.flatten()
+                labels = kmeans.labels_
+            elif method == 'em':
+                gmm = GaussianMixture(n_components=2, random_state=0).fit(flat_channel)
+                labels = gmm.predict(flat_channel)
+                centers = gmm.means_.flatten()
+            elif method == 'vb':
+                bgm = BayesianGaussianMixture(n_components=2, random_state=0).fit(flat_channel)
+                labels = bgm.predict(flat_channel)
+                centers = bgm.means_.flatten()
+            else:
+                raise ValueError("Method must be 'kmeans', 'em', or 'vb'")
 
-        fg_label = np.argmax(centers)
-        fg_mask = (labels == fg_label)
-        fg_values = flat_channel[fg_mask]
-        fg_mean = np.mean(fg_values)
-        fg_std = np.std(fg_values)
+            fg_label = np.argmax(centers)
+            fg_mask = (labels == fg_label)
+            fg_values = flat_channel[fg_mask]
 
-        return fg_mask, fg_mean, fg_std
+            if len(fg_values) > 0:
+                fg_mean = np.mean(fg_values)
+                fg_std = np.std(fg_values)
+            else:
+                fg_mean = 0
+                fg_std = 1
+
+            return fg_mask, fg_mean, fg_std
+
+        except Exception as e:
+            print(f"Error in clustering: {e}")
+            return np.ones(len(flat_channel), dtype=bool), np.mean(flat_channel), np.std(flat_channel) if len(
+                flat_channel) > 0 else 1.0
 
     def all_pixel_quantile_norm(self, image):
         source_flat = image.reshape(-1,3)
@@ -165,9 +182,13 @@ class Normalization:
 
         return result
 
-    def stain_specific_normalization(self, image, cluster_method='kmeans', deconvolution_method='reference'):
+    def stain_specific_normalization(self, image, cluster_method='kmeans'):
         image_od = Deconvolution.convert_OD(image)
         od_flat = image_od.reshape(-1, 3)
+
+        if self.target_stain_matrix is None:
+            self.extract_target_stains_stats()
+
         stain_matrix = self.target_stain_matrix
         concentrations = Deconvolution.deconv_stains(od_flat, stain_matrix)
         n_stains = stain_matrix.shape[1]
@@ -175,17 +196,29 @@ class Normalization:
 
         for i in range(n_stains):
             conc = concentrations[:, i]
+            valid_conc = conc[np.isfinite(conc)]
+            if len(valid_conc) == 0:
+                normalized_concentrations[:, i] = conc
+                continue
+
             fg_mask, fg_mean, fg_std = self.cluster_stain_channel(conc, cluster_method)
+            if i not in self.target_stats:
+                self.extract_target_stains_stats()
+
             trg_mean, trg_std = self.target_stats[i]
-            normalized_foreground = (conc[fg_mask] - fg_mean) * (trg_std / fg_std) +trg_mean
+            if fg_std == 0:
+                fg_std = 1e-6
+
+            normalized_foreground = (conc[fg_mask] - fg_mean) * (trg_std / fg_std) + trg_mean
             normalized_concentrations[fg_mask, i] = normalized_foreground
             normalized_concentrations[~fg_mask, i] = conc[~fg_mask]
+
         normalized_od_flat = np.dot(normalized_concentrations, stain_matrix.T)
         normalized_rgb = 255 * np.exp(-normalized_od_flat)
         normalized_rgb = np.clip(normalized_rgb, 0, 255).astype(np.uint8)
         normalized_rgb = normalized_rgb.reshape(image.shape)
 
-        return normalized_rgb.astype(np.uint8)
+        return normalized_rgb
 
     def normalize(self, image, method='stain_specific', **kwargs):
         if method == 'all_pixel_quantile':
@@ -195,7 +228,10 @@ class Normalization:
         elif method == 'reinhard':
             return self.reinhard_normalization(image)
         elif method == 'stain_specific':
-            return self.stain_specific_normalization(image, **kwargs)
+            valid_kwargs = {}
+            if 'cluster_method' in kwargs:
+                valid_kwargs['cluster_method'] = kwargs['cluster_method']
+            return self.stain_specific_normalization(image, **valid_kwargs)
         else:
             raise ValueError("Unsupported normalization method")
 

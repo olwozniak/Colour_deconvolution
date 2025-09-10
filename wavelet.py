@@ -6,7 +6,6 @@ from sklearn.decomposition import FastICA
 from sklearn.linear_model import LinearRegression
 from deconvolution import Deconvolution
 
-
 class Wavelet():
     def __init__(self):
         pass
