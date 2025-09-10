@@ -1,0 +1,47 @@
+{
+    "wavelet_stain_specific": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "wavelet_reinhard": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "wavelet_all_pixel_quantile": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "wavelet_colour_map_quantile": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "wavelet_none": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "ruifork_stain_specific": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "ruifork_reinhard": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "ruifork_all_pixel_quantile": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "ruifork_colour_map_quantile": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "ruifork_none": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "reference_stain_specific": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "reference_reinhard": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "reference_all_pixel_quantile": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "reference_colour_map_quantile": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    },
+    "reference_none": {
+        "error": "type object 'Compare' has no attribute 'calculate_stain_metrics'"
+    }
+}

@@ -1,0 +1,17 @@
+{
+  "wavelet_stain_specific": 5.573147296905518,
+  "wavelet_reinhard": 4.359886646270752,
+  "wavelet_all_pixel_quantile": 5.675426244735718,
+  "wavelet_colour_map_quantile": 11.857670307159424,
+  "wavelet_none": 4.150050640106201,
+  "ruifork_stain_specific": 2.1776795387268066,
+  "ruifork_reinhard": 0.944603681564331,
+  "ruifork_all_pixel_quantile": 2.1715168952941895,
+  "ruifork_colour_map_quantile": 8.423947095870972,
+  "ruifork_none": 0.6518838405609131,
+  "reference_stain_specific": 2.0655698776245117,
+  "reference_reinhard": 0.8166148662567139,
+  "reference_all_pixel_quantile": 2.103912591934204,
+  "reference_colour_map_quantile": 8.253583669662476,
+  "reference_none": 0.5820784568786621
+}

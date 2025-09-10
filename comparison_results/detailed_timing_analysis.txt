@@ -1,0 +1,16 @@
+SZCZEGÓŁOWA ANALIZA CZASOWA METOD
+CZASY DEKONWOLUCJI:
+
+CZASY NORMALIZACJI:
+
+NAJSZYBSZE METODY:
+
+NAJWOLNIEJSZE METODY:
+
+STATYSTYKI OGÓLNE:
+--------------------
+Łączny czas: 0.00s
+Średni czas: nans
+Mediana: nans
+Odchylenie standardowe: nans
+Liczba metod: 0

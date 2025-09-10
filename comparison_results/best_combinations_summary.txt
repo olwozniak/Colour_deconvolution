@@ -1,0 +1,19 @@
+NAJLEPSZE KOMBINACJE METOD
+==================================================
+
+Dla kluczowych metryk:
+------------------------------
+Błąd rekonstrukcji (MSE) : ruifork_none                   (wartość: 3227.9208)
+Separacja plam (wariancja): ruifork_none                   (wartość: 1618.3265)
+Korelacja plam           : ruifork_stain_specific         (wartość: 0.1010)
+
+WNIOSKI:
+Najlepsza ogólna kombinacja: ruifork_none
+→ Metoda dekonwolucji: ruifork
+→ Metoda normalizacji: none
+
+ANALIZA CZASOWA:
+--------------------
+NAJSZYBSZE DEKONWOLUCJE:
+  wavelet: nans
+NAJSZYBSZE NORMALIZACJE:
